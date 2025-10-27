@@ -1,0 +1,783 @@
+---
+title: "Analyse du dataset StudentPerformance"
+author: "Ahmed Ben Yaflah & Islem Ridene"
+date: "2025-05-07"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+
+## Introduction
+
+
+Cette étude vise à analyser le dataset "StudentPerformance" qui contient des informations sur les performances académiques d'étudiants et leurs caractéristiques socio-démographiques. Notre objectif est d'identifier les facteurs influençant les résultats scolaires et d'explorer les relations entre les différentes variables.
+
+Pour mener cette analyse, nous utilisons plusieurs méthodologies statistiques vues en cours, notamment les analyses univariées (statistiques descriptives, histogrammes, diagrammes) et bivariées (corrélations, régressions simples, tests du khi-deux). Nous complétons cette approche par des techniques d'analyse multivariée comme l'Analyse en Composantes Principales (ACP), l'Analyse Factorielle des Correspondances (AFC) et la régression multiple.
+
+Cette démarche méthodologique nous permettra d'extraire des informations pertinentes sur les déterminants de la réussite scolaire et potentiellement d'orienter des interventions éducatives ciblées.
+
+NB!!:
+Nous avons utilisé la majorité des fonctions et des bibliothéques vues en classe avec l'ajout d'autres
+
+
+>1. Chargement et exploration des données
+
+- Chargement des packages nécessaires
+```{r}
+library(plotly)
+library(vcd)
+library(tidyverse)
+library(psych)
+library(corrplot)
+library(ggplot2)
+library(MASS)
+library(FactoMineR)
+library(factoextra)
+library(ca)
+```
+- Chargement des données
+```{r}
+data <- read.csv("./StudentsPerformance.csv", header = TRUE, sep = ",")
+```
+- Aperçu des données
+```{r}
+head(data)
+```
+
+- Structure des données
+```{r}
+str(data)
+```
+- Dimensions du dataframe
+```{r}
+dim(data)
+```
+- Noms des colonnes
+```{r}
+names(data)
+```
+- Analyse descriptive globale
+```{r}
+describe(data)
+```
+
+>2. Préparation des données
+
+- Conversion des scores en variables numériques
+```{r}
+data$math_score <- as.numeric(data$'math.score')
+data$reading_score <- as.numeric(data$'reading.score')
+data$writing_score <- as.numeric(data$'writing.score')
+```
+- Création d'une variable pour le score total
+```{r}
+data$total_score <- data$math_score + data$reading_score + data$writing_score
+```
+- Vérification des valeurs manquantes
+```{r}
+sum(is.na(data))
+```
+**Ne contient aucune valeur manquante (NA) dans aucune colonne.
+
+>3. Analyses univariées
+
+3.1. Variables quantitatives (numériques)
+
+- Statistiques descriptives complètes pour les scores
+```{r}
+summary(data["math_score"])
+summary(data["reading_score"])
+summary(data["writing_score"])
+summary(data["total_score"])
+```
+- Calcul des écarts-types
+```{r}
+sd(data$math_score)
+sd(data$reading_score)
+sd(data$writing_score)
+sd(data$total_score)
+```
+- Calcul des quartiles
+```{r}
+sapply(data[, c("math_score", "reading_score", "writing_score", "total_score")], 
+       function(x) quantile(x, probs = c(0.25, 0.5, 0.75)))
+```
+
+- Intervalles de confiance pour les moyennes: Quantifier la précision de l'estimation
+```{r}
+t.test(data$math_score)$conf.int#On estime avec 95 % de confiance que la vraie moyenne des scores en mathématiques dans la population se situe entre 65.15 et 67.03.
+t.test(data$reading_score)$conf.int#La vraie moyenne des scores en lecture a 95 % de chances d'être comprise entre 68.26 et 70.08.
+t.test(data$writing_score)$conf.int#La vraie moyenne des scores en écriture a 95 % de chances d'être comprise entre 67.11 et 69.00.
+```
+**Les scores de lecture ont la moyenne estimée la plus élevée (autour de 69.17), suivis de l'écriture (~68.05) et des mathématiques (~66.09).
+
+**Les largeurs des intervalles sont similaires, ce qui suggère une précision comparable pour les trois estimations.
+Représentations graphiques
+
+- Histogramme des scores en mathématiques
+```{r}
+hist(data$math_score, 
+     col = "blue", 
+     border = "white",
+     main = "Distribution des scores en mathématiques",
+     xlab = "Score en mathématiques", 
+     ylab = "Fréquence",
+     labels = TRUE)
+```
+
+- Histogramme avec courbe de densité
+```{r}
+hist(data$math_score, 
+     col = "blue", 
+     border = "white",
+     prob = TRUE,
+     main = "Distribution des scores en mathématiques avec courbe de densité",
+     xlab = "Score en mathématiques", 
+     ylab = "Densité")
+lines(density(data$math_score), lwd = 2, col = "red")
+```
+
+- Estimateur à noyau de la densité
+```{r}
+plot(density(data$math_score), 
+     main = "Estimateur à noyau de la densité - Score en mathématiques",
+     xlab = "Score en mathématiques")
+```
+
+- Histogrammes pour les autres scores
+```{r}
+par(mfrow = c(1, 3))
+hist(data$math_score, main = "Scores en mathématiques", col = "lightblue", prob = TRUE)
+lines(density(data$math_score), lwd = 2, col = "red")
+
+hist(data$reading_score, main = "Scores en lecture", col = "lightgreen", prob = TRUE)
+lines(density(data$reading_score), lwd = 2, col = "red")
+
+hist(data$writing_score, main = "Scores en écriture", col = "lightpink", prob = TRUE)
+lines(density(data$writing_score), lwd = 2, col = "red")
+par(mfrow = c(1, 1))#nettoyer l'espace graphique avant de créer un nouveau plot et éviter que les graphiques suivants s'affichent dans une grille précédente
+```
+
+- Boîtes à moustaches pour comparer les distributions
+```{r}
+boxplot(data$math_score, data$reading_score, data$writing_score,
+        names = c("Mathématiques", "Lecture", "Écriture"),
+        col = c("lightblue", "lightgreen", "lightpink"),
+        main = "Comparaison des distributions des scores")
+```
+
+- Les Outliers : observations qui s'écartent significativement du reste des données
+```{r}
+data_long <- tidyr::pivot_longer(data, cols = c(math_score, reading_score, writing_score))
+
+ggplot(data_long, aes(x = name, y = value, fill = name)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 8) +
+  scale_fill_manual(values = c("lightblue", "lightgreen", "lightpink")) +
+  labs(title = "Distributions avec outliers marqués en rouge")
+```
+
+3.2 Variables qualitatives(catégorielles) 
+
+- Tableau de fréquences pour le genre
+```{r}
+table_gender <- table(data$gender)
+table_gender
+prop.table(table_gender) * 100  # Pourcentages
+```
+
+- Tableau de fréquences pour le groupe ethnique
+```{r}
+table_race <- table(data$`race.ethnicity`)
+table_race
+prop.table(table_race) * 100  # Pourcentages
+```
+
+- Tableau de fréquences pour le niveau d'éducation des parents
+```{r}
+table_education <- table(data$`parental.level.of.education`)
+table_education
+prop.table(table_education) * 100  # Pourcentages
+```
+
+- Tableau de fréquences pour le type de déjeuner
+```{r}
+table_lunch <- table(data$lunch)
+table_lunch
+prop.table(table_lunch) * 100  # Pourcentages
+```
+ -Tableau de fréquences pour la préparation aux tests
+```{r}
+table_prep <- table(data$`test.preparation.course`)
+table_prep
+prop.table(table_prep) * 100  # Pourcentages
+```
+
+Représentations graphiques
+
+- Diagramme en barres pour le genre
+```{r}
+barplot(table(data$gender), 
+        col = c("pink", "lightblue"),
+        main = "Répartition par genre",
+        ylab = "Fréquence")
+```
+
+- Diagramme en barres pour le groupe ethnique
+```{r}
+barplot(table(data$`race.ethnicity`), 
+        col = rainbow(length(levels(factor(data$`race.ethnicity`)))),
+        main = "Répartition par groupe ethnique",
+        las = 2,
+        ylab = "Fréquence")
+```
+
+- Diagramme en secteurs pour le niveau d'éducation des parents
+```{r}
+pie(table(data$`parental.level.of.education`), 
+    col = rainbow(length(levels(factor(data$`parental.leve.of.education`)))),
+    main = "Niveau d'éducation des parents")
+```
+
+- Ajout des pourcentages au diagramme en secteurs
+```{r}
+education_counts <- table(data$`parental.level.of.education`)
+education_labels <- names(education_counts)
+education_pct <- round(prop.table(education_counts) * 100, 1)
+education_labels <- paste(education_labels, " (", education_pct, "%)", sep = "")
+
+pie(education_counts, 
+    labels = education_labels,
+    col = rainbow(length(education_counts)),
+    main = "Niveau d'éducation des parents (avec pourcentages)")
+```
+
+- Diagramme en barres pour le type de déjeuner
+```{r}
+barplot(table(data$lunch), 
+        col = c("lightgreen", "coral"),
+        main = "Type de déjeuner",
+        ylab = "Fréquence")
+```
+
+- Diagramme en barres pour la préparation aux tests
+```{r}
+barplot(table(data$`test.preparation.course`), 
+        col = c("lightblue", "lightcoral"),
+        main = "Préparation aux tests",
+        ylab = "Fréquence")
+```
+
+>4. Analyses bivariées
+
+4.1 Relations entre variables quantitatives
+
+Représentations graphiques
+
+- Nuage de points entre les scores de mathématiques et de lecture
+```{r}
+plot(data$math_score, data$reading_score,
+     pch = 19, col = "blue",
+     main = "Relation entre les scores de mathématiques et de lecture",
+     xlab = "Score en mathématiques",
+     ylab = "Score en lecture")
+```
+
+- Nuage de points entre les scores de mathématiques et d'écriture
+```{r}
+plot(data$math_score, data$writing_score,
+     pch = 19, col = "green",
+     main = "Relation entre les scores de mathématiques et d'écriture",
+     xlab = "Score en mathématiques",
+     ylab = "Score en écriture")
+```
+
+- Nuage de points entre les scores de lecture et d'écriture
+```{r}
+plot(data$reading_score, data$writing_score,
+     pch = 19, col = "red",
+     main = "Relation entre les scores de lecture et d'écriture",
+     xlab = "Score en lecture",
+     ylab = "Score en écriture")
+```
+
+- Estimation locale de densité pour math et reading
+```{r}
+tmp <- data[, c("math_score", "reading_score")]
+tmp <- tmp[complete.cases(tmp), ]
+filled.contour(kde2d(tmp$math_score, tmp$reading_score), 
+               color = terrain.colors,
+               main = "Estimation locale de densité - Math vs Reading")
+```
+
+- Estimation locale de densité pour math et writing
+```{r}
+tmp <- data[, c("math_score", "writing_score")]
+tmp <- tmp[complete.cases(tmp), ]
+filled.contour(kde2d(tmp$math_score, tmp$writing_score), 
+               color = terrain.colors,
+               main = "Estimation locale de densité - Math vs Writing")
+```
+
+```{r}
+# Nuage de points avec coloration par groupe ethnique
+# Sélection de deux groupes pour l'exemple
+group_a <- data$`race.ethnicity` == "group A"
+group_b <- data$`race.ethnicity` == "group B"
+
+plot(data$math_score[group_a], data$reading_score[group_a],
+     pch = 15, col = "blue",
+     main = "Scores par groupe ethnique",
+     xlab = "Score en mathématiques",
+     ylab = "Score en lecture",
+     xlim = range(data$math_score),
+     ylim = range(data$reading_score))
+points(data$math_score[group_b], data$reading_score[group_b],
+       pch = 17, col = "red")
+legend("bottomright", 
+       legend = c("Groupe A", "Groupe B"),
+       col = c("blue", "red"),
+       pch = c(15, 17))
+```
+
+Coefficients de corrélation
+
+- Matrice de corrélation entre les scores
+```{r}
+cor_matrix <- cor(data[, c("math_score", "reading_score", "writing_score")], 
+                  use = "complete.obs")
+cor_matrix
+```
+- Visualisation de la matrice de corrélation
+
+```{r}
+
+plot_ly(z = cor_matrix, type = "heatmap",
+        x = colnames(cor_matrix),
+        y = rownames(cor_matrix))
+```
+
+- Coefficient de corrélation entre mathématiques et lecture
+
+```{r}
+cor_math_reading <- cor(data$math_score, data$reading_score, use = "complete.obs")
+cat("Coefficient de corrélation entre math et reading:", cor_math_reading, "\n")
+```
+
+- Coefficient de corrélation entre mathématiques et écriture
+```{r}
+cor_math_writing <- cor(data$math_score, data$writing_score, use = "complete.obs")
+cat("Coefficient de corrélation entre math et writing:", cor_math_writing, "\n")
+```
+
+- Coefficient de corrélation entre lecture et écriture
+```{r}
+cor_reading_writing <- cor(data$reading_score, data$writing_score, use = "complete.obs")
+cat("Coefficient de corrélation entre reading et writing:", cor_reading_writing, "\n")
+```
+
+- Interprétation des coefficients de corrélation
+```{r}
+cat("\nInterprétation des coefficients de corrélation:\n")
+if(cor_math_reading > 0.7) {
+  cat(" Forte corrélation positive entre math et reading\n")
+} else if(cor_math_reading > 0.3) {
+  cat(" Corrélation modérée positive entre math et reading\n")
+} else {
+  cat(" Faible corrélation entre math et reading\n")
+}
+
+if(cor_math_writing > 0.7) {
+  cat(" Forte corrélation positive entre math et writing\n")
+} else if(cor_math_writing > 0.3) {
+  cat(" Corrélation modérée positive entre math et writing\n")
+} else {
+  cat(" Faible corrélation entre math et writing\n")
+}
+
+if(cor_reading_writing > 0.7) {
+  cat(" Forte corrélation positive entre reading et writing\n")
+} else if(cor_reading_writing > 0.3) {
+  cat(" Corrélation modérée positive entre reading et writing\n")
+} else {
+  cat(" Faible corrélation entre reading et writing\n")
+}
+```
+
+Régression linéaire simple
+
+- Régression linéaire: score en lecture en fonction du score en mathématiques
+```{r}
+reg <- lm(reading_score ~ math_score, data = data)
+summary(reg)
+```
+
+- Interprétation des coefficients
+
+```{r}
+cat("Équation de la droite de régression: reading_score =", 
+    round(reg$coefficients[1], 2), "+", 
+    round(reg$coefficients[2], 2), "* math_score\n")
+
+cat("R² =", round(summary(reg)$r.squared, 4), 
+    "- Cela signifie que", round(summary(reg)$r.squared * 100, 2), 
+    "% de la variance du score en lecture est expliquée par le score en mathématiques.\n")
+```
+
+- Visualisation de la régression
+
+```{r}
+plot(data$math_score, data$reading_score,
+     pch = 19, col = "blue",
+     main = "Régression linéaire: lecture ~ mathématiques",
+     xlab = "Score en mathématiques",
+     ylab = "Score en lecture")
+abline(reg, col = "red", lwd = 2)
+```
+
+- Analyse des résidus
+```{r}
+par(mfrow = c(2, 2))
+plot(reg)
+par(mfrow = c(1, 1))
+```
+- Interprétation des résidus
+
+```{r}
+cat("\nAnalyse des résidus:\n")
+cat("- Résidus vs Valeurs ajustées: ", 
+    ifelse(shapiro.test(reg$residuals)$p.value > 0.05, 
+           "Les résidus semblent homoscédastiques (variance constante).", 
+           "Les résidus présentent de l'hétéroscédasticité."), "\n")
+
+cat("- Normal Q-Q: ", 
+    ifelse(shapiro.test(reg$residuals)$p.value > 0.05, 
+           "Les résidus suivent approximativement une distribution normale.", 
+           "Les résidus ne suivent pas une distribution normale."), "\n")
+```
+
+- Prédictions
+
+```{r}
+new_data <- data.frame(math_score = c(50, 70, 90))
+predictions <- predict(reg, newdata = new_data, interval = "confidence")
+predictions_df <- cbind(new_data, predictions)
+predictions_df
+```
+
+4.2 Relations entre variables qualitatives
+
+- Tableau de contingence entre genre et préparation aux tests
+```{r}
+table_gender_prep <- table(data$gender, data$`test.preparation.course`)
+table_gender_prep
+```
+
+- Proportions
+```{r}
+prop.table(table_gender_prep)
+prop.table(table_gender_prep, margin = 1)  # Proportions par ligne
+prop.table(table_gender_prep, margin = 2)  # Proportions par colonne
+```
+
+- Test du khi-deux
+```{r}
+chi_test <- chisq.test(table_gender_prep)
+chi_test
+```
+
+- Interprétation du test du khi-deux
+```{r}
+cat("Test du khi-deux:\n")
+cat("- Valeur du khi-deux:", chi_test$statistic, "\n")
+cat("- Degrés de liberté:", chi_test$parameter, "\n")
+cat("- p-value:", chi_test$p.value, "\n")
+cat("- Interprétation: ", 
+    ifelse(chi_test$p.value < 0.05, 
+           "Il existe une relation significative entre le genre et la préparation aux tests.", 
+           "Il n'y a pas de relation significative entre le genre et la préparation aux tests."), "\n")
+```
+
+- Test exact de Fisher
+```{r}
+fisher_test <- fisher.test(table_gender_prep)
+fisher_test
+```
+
+- Graphique en mosaïque
+```{r}
+mosaicplot (table_gender_prep, data = data, shade = TRUE, main="Relation entre genre et préparation aux tests")
+```
+
+- Tableau de contingence entre groupe ethnique et niveau d'éducation des parents
+```{r}
+table_race_edu <- table(data$`race.ethnicity`, data$`parental.level.of.education`)
+table_race_edu
+```
+
+- Test du khi-deux
+```{r}
+chi_test_race_edu <- chisq.test(table_race_edu)
+chi_test_race_edu
+```
+
+- Graphique en mosaïque
+```{r}
+mosaicplot(table_race_edu, 
+           shade = TRUE, 
+           main = "Relation entre groupe ethnique et niveau d'éducation des parents")
+```
+
+4.3 Relations entre variables qualitatives et quantitatives
+
+- Boîtes à moustaches des scores en mathématiques par genre
+```{r}
+boxplot(math_score ~ gender, data = data,
+        col = c("pink", "lightblue"),
+        main = "Scores en mathématiques par genre",
+        xlab = "Genre",
+        ylab = "Score en mathématiques")
+```
+
+- Statistiques descriptives par genre
+
+```{r}
+by(data$math_score, data$gender, summary)
+by(data$math_score, data$gender, sd)
+```
+
+- Boîtes à moustaches des scores en mathématiques par niveau d'éducation des parents
+
+```{r}
+boxplot(math_score ~ `parental.level.of.education`, data = data,
+        col = rainbow(length(levels(factor(data$`parental.level.of.education`)))),
+        main = "Scores en mathématiques par niveau d'éducation des parents",
+        xlab = "Niveau d'éducation des parents",
+        ylab = "Score en mathématiques",
+        las = 2)
+```
+
+- Statistiques descriptives par niveau d'éducation
+
+```{r}
+by(data$math_score, data$`parental.level.of.education`, summary)
+```
+
+- Boîtes à moustaches des scores en mathématiques par préparation aux tests
+
+```{r}
+boxplot(math_score ~ `test.preparation.course`, data = data,
+        col = c("lightblue", "lightcoral"),
+        main = "Scores en mathématiques par préparation aux tests",
+        xlab = "Préparation aux tests",
+        ylab = "Score en mathématiques")
+```
+
+- Statistiques descriptives par préparation aux tests
+
+```{r}
+by(data$math_score, data$`test.preparation.course`, summary)
+by(data$math_score, data$`test.preparation.course`, sd)
+```
+
+- Comparaison des moyennes par groupe (t-test)
+
+```{r}
+t.test(math_score ~ gender, data = data)
+t.test(math_score ~ `test.preparation.course`, data = data)
+```
+
+- Visualisation des scores moyens par groupe ethnique
+
+```{r}
+tapply(data$math_score, data$`race.ethnicity`, mean)
+barplot(tapply(data$math_score, data$`race.ethnicity`, mean),
+        col = rainbow(length(levels(factor(data$`race.ethnicity`)))),
+        main = "Score moyen en mathématiques par groupe ethnique",
+        xlab = "Groupe ethnique",
+        ylab = "Score moyen",
+        las = 2)
+```
+
+>5. Analyse en Composantes Principales (ACP)
+
+- Sélection des variables quantitatives
+```{r}
+data_pca <- data[, c("math_score", "reading_score", "writing_score")]
+```
+
+- Réalisation de l'ACP
+```{r}
+resultat <- PCA(data_pca, scale.unit = TRUE, graph = FALSE)
+```
+
+- Valeurs propres
+```{r}
+eigenvalues <- get_eigenvalue(resultat)
+eigenvalues
+```
+
+
+- Visualisation du scree plot
+```{r}
+fviz_eig(resultat, addlabels = TRUE, ylim = c(0, 80))
+```
+
+- Pourcentage de variance expliquée
+```{r}
+cat("Pourcentage de variance expliquée par les composantes principales:\n")
+cat("- PC1:", round(eigenvalues[1, 2], 2), "%\n")
+cat("- PC2:", round(eigenvalues[2, 2], 2), "%\n")
+cat("- PC3:", round(eigenvalues[3, 2], 2), "%\n")
+cat("- Variance cumulée (PC1+PC2):", round(eigenvalues[2, 3], 2), "%\n")
+```
+
+- Graphique des variables
+```{r}
+var <- get_pca_var(resultat)
+corrplot(var$cos2, is.corr = FALSE)
+corrplot(var$cos2, is.corr = FALSE, method = "number")
+```
+
+- Qualité de représentation des variables
+```{r}
+fviz_pca_var(resultat, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+- Graphique des individus
+```{r}
+fviz_pca_ind(resultat, 
+             col.ind = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+```
+
+- Biplot
+```{r}
+fviz_pca_biplot(resultat, 
+                col.var = "#2E9FDF",
+                col.ind = "#696969",
+                repel = TRUE)
+```
+
+- Interprétation des axes
+```{r}
+cat("\nInterprétation des axes principaux:\n")
+cat("- PC1 (", round(eigenvalues[1, 2], 2), "% de variance): représente le niveau général de performance académique\n")
+cat("- PC2 (", round(eigenvalues[2, 2], 2), "% de variance): représente la différence entre les compétences mathématiques et linguistiques\n")
+```
+
+>6. Analyse Factorielle des Correspondances (AFC)
+
+- Tableau de contingence pour l'AFC
+```{r}
+table_race_edu <- table(data$`race.ethnicity`, data$`parental.level.of.education`)
+```
+
+- Réalisation de l'AFC
+```{r}
+afc <- CA(table_race_edu, graph = FALSE)
+```
+
+- Valeurs propres et pourcentage d'inertie
+```{r}
+summary(afc)
+```
+
+- Visualisation des résultats
+```{r}
+plot(afc, main = "AFC: Groupe ethnique et niveau d'éducation des parents")
+```
+
+- Graphique des lignes (groupes ethniques)
+```{r}
+plot(afc, axes = c(1, 2), col.row = "blue", col.col = "red", 
+     map = "rowprincipal", main = "AFC: Projection des groupes ethniques")
+```
+
+- Graphique des colonnes (niveaux d'éducation)
+```{r}
+plot(afc, axes = c(1, 2), col.row = "blue", col.col = "red", 
+     map = "colprincipal", main = "AFC: Projection des niveaux d'éducation")
+```
+
+- Biplot
+```{r}
+fviz_ca_biplot(afc, repel = TRUE)
+```
+
+>7. Intervalles de confiance
+
+- Intervalle de confiance pour la moyenne des scores en mathématiques
+```{r}
+t_test_math <- t.test(data$math_score)
+t_test_math
+
+cat("Intervalle de confiance à 95% pour la moyenne des scores en mathématiques:\n")
+cat("[", round(t_test_math$conf.int[1], 2), ", ", round(t_test_math$conf.int[2], 2), "]\n")
+```
+
+- Intervalle de confiance pour la moyenne des scores en lecture
+```{r}
+t_test_reading <- t.test(data$reading_score)
+t_test_reading
+
+cat("Intervalle de confiance à 95% pour la moyenne des scores en lecture:\n")
+cat("[", round(t_test_reading$conf.int[1], 2), ", ", round(t_test_reading$conf.int[2], 2), "]\n")
+```
+
+- Intervalle de confiance pour la moyenne des scores en écriture
+```{r}
+t_test_writing <- t.test(data$writing_score)
+t_test_writing
+
+cat("Intervalle de confiance à 95% pour la moyenne des scores en écriture:\n")
+cat("[", round(t_test_writing$conf.int[1], 2), ", ", round(t_test_writing$conf.int[2], 2), "]\n")
+```
+
+- Intervalle de confiance pour la différence des moyennes (math vs reading)
+```{r}
+t_test_diff <- t.test(data$math_score, data$reading_score, paired = TRUE)
+t_test_diff
+
+cat("Intervalle de confiance à 95% pour la différence des moyennes (math - reading):\n")
+cat("[", round(t_test_diff$conf.int[1], 2), ", ", round(t_test_diff$conf.int[2], 2), "]\n")
+```
+
+>8. Conclusion
+
+- Résumé de l'exploration des données
+
+L'analyse du dataset StudentPerformance a permis d'explorer un ensemble de 1000 observations comportant 8 variables, dont 5 qualitatives (genre, groupe ethnique, niveau d'éducation des parents, type de repas, préparation aux tests) et 3 quantitatives (scores en mathématiques, lecture et écriture). Les données ne présentaient aucune valeur manquante, facilitant ainsi l'analyse.
+
+- Analyses univariées
+
+Les analyses univariées ont révélé des distributions relativement normales pour les trois scores académiques, avec des moyennes de 66,09 pour les mathématiques, 69,17 pour la lecture et 68,05 pour l'écriture. La répartition des variables qualitatives a montré une légère prédominance de femmes (51,8%), une plus forte représentation du groupe ethnique C (31,9%), et une majorité d'étudiants n'ayant pas suivi de préparation aux tests (64,2%). Les repas standard concernaient 64,5% des étudiants, suggérant une population majoritairement issue de milieux non défavorisés.
+
+- Analyses bivariées
+
+Les analyses bivariées ont mis en évidence des corrélations fortes entre les trois scores académiques, particulièrement entre la lecture et l'écriture (r = 0,95). La régression linéaire a montré que le score en mathématiques explique 66,8% de la variance du score en lecture, confirmant l'interdépendance des compétences académiques.
+
+Les tests statistiques ont révélé des différences significatives de performance selon le genre (p < 0,001), avec des scores en mathématiques plus élevés chez les garçons, et selon la préparation aux tests (p < 0,001), avec un avantage marqué pour les étudiants ayant suivi une préparation. En revanche, aucune relation significative n'a été détectée entre le genre et la participation à la préparation aux tests (p = 0,90).
+
+- Analyses multivariées
+
+L'Analyse en Composantes Principales (ACP) a permis d'identifier une structure forte dans les données, avec une première composante expliquant 90,6% de la variance totale et représentant le niveau général de performance académique. La seconde composante (7,9% de variance) distingue les compétences mathématiques des compétences linguistiques.
+
+L'Analyse Factorielle des Correspondances (AFC) a exploré les relations entre groupes ethniques et niveaux d'éducation parentale, révélant certaines associations, bien que le test du khi-deux n'ait pas atteint le seuil de significativité conventionnel (p = 0,079).
+
+- Intervalles de confiance
+
+Les intervalles de confiance à 95% ont permis de quantifier la précision des estimations des scores moyens : [65,15 - 67,03] pour les mathématiques, [68,26 - 70,08] pour la lecture et [67,11 - 69,00] pour l'écriture. La différence entre les scores de mathématiques et de lecture est significative, avec un intervalle de confiance de [-3,64 - -2,52].
+
+- Implications générales
+
+Cette analyse complète a démontré l'influence significative de facteurs socio-démographiques et éducatifs sur la performance académique des étudiants. Les résultats suggèrent que des interventions ciblées, notamment la préparation aux tests et le soutien aux étudiants issus de milieux défavorisés, pourraient contribuer à réduire les écarts de performance. L'interdépendance des compétences académiques souligne également l'importance d'une approche pédagogique intégrée, où le renforcement d'une compétence peut avoir des effets positifs sur les autres.
+
+Les méthodes statistiques employées, allant des analyses descriptives simples aux techniques multivariées plus complexes, ont permis d'extraire des informations pertinentes et complémentaires, offrant une vision globale des facteurs influençant la réussite scolaire dans ce dataset.
